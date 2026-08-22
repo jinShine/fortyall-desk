@@ -1,3 +1,55 @@
 spring:
   application:
     name: fortyall-desk
+
+  profiles:
+    active: local
+
+fortyall:
+  qr:
+    secret: ${QR_SECRET:fortyall-desk-dev-only-secret-change-me}
+
+logging:
+  level:
+    com.buzz.fortyall_desk: INFO
+    org.hibernate.SQL: DEBUG
+
+---
+spring:
+  config:
+    activate:
+      on-profile: h2
+  datasource:
+    url: jdbc:h2:mem:fortyall;MODE=MySQL;DB_CLOSE_DELAY=-1
+    driver-class-name: org.h2.Driver
+    username: sa
+    password:
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    properties:
+      hibernate:
+        format_sql: true
+  h2:
+    console:
+      enabled: true          # http://localhost:8080/h2-console 에서 테이블 직접 확인
+      path: /h2-console
+
+---
+spring:
+  config:
+    activate:
+      on-profile: local
+  datasource:
+    url: jdbc:mysql://localhost:3306/fortyall_desk?serverTimezone=Asia/Seoul&characterEncoding=UTF-8&rewriteBatchedStatements=true
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    username: ${DB_USER:fortyall}
+    password: ${DB_PASSWORD:fortyall}
+    hikari:
+      maximum-pool-size: 10
+  jpa:
+    hibernate:
+      ddl-auto: update
+    properties:
+      hibernate:
+        format_sql: true

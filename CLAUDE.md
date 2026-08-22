@@ -45,15 +45,30 @@ Scheduler(Materializer 배치) · React PWA + 웹푸시 · 문자 API(공용 발
 
 ## 프로젝트 구조
 - 루트 패키지: `com.buzz.fortyall_desk` — 진입점 `FortyallDeskApplication`
-- 설정: `src/main/resources/application.yaml`
-- 패키지 배치 규칙(도메인별 vs 레이어별)은 **아직 미결** — W1에서 첫 엔티티를 만들 때 정한다.
-- ⚠️ `application.yaml`에 **datasource 설정이 아직 없다** → `bootRun`은 현재 실패한다. W1에서 MySQL 접속 정보 추가 필요.
-  (테스트는 H2가 자동 구성되므로 `./gradlew build`는 통과한다.)
+- 설정: `src/main/resources/application.yaml` (프로필 2개: `local`=MySQL 기본 / `h2`=인메모리)
+- **패키지 배치 = 도메인별 + 레이어 하위 폴더**
+  ```
+  com.buzz.fortyall_desk
+  ├── account · auth · center · lesson · pass · product · schedule
+  │     └── controller / service / repository / dto / entity
+  ├── common   └── dto / entity / exception / repository / service
+  └── config
+  ```
+  레이어별로만 나누면 `service/`에 11개 도메인 서비스가 섞인다. 도메인 폴더 안에서 규칙이 모이는 쪽을 택했다.
+- **코드 주석은 두지 않는다.** 설계 근거는 코드가 아니라 `docs/`가 보관한다 — 기획서와 API 설계서가 정본이다.
+
+**DB — Docker MySQL 8.4 (localhost:3306)**
+`docker-compose.yml` 참조. 계정 `fortyall / fortyall`, DB `fortyall_desk`.
+데이터는 named volume `fortyall-desk_mysql-data`에 남아 컨테이너를 재생성해도 유지된다.
 
 **자주 쓰는 명령**
 ```bash
-./gradlew build      # 컴파일 + 테스트
-./gradlew test       # 테스트만
+docker compose up -d      # MySQL 기동 (앱보다 먼저)
+./gradlew bootRun         # 앱 실행 (기본 프로필 local = MySQL)
+./gradlew build           # 컴파일 + 테스트
+./scripts/e2e.sh          # 코어 플로우 점검
+./scripts/db.sh --tables  # 테이블별 행 수
+./scripts/db.sh --ledger 1  # 수업권 원장 조회
 ```
 
 ## 개발 방식
