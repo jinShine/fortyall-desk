@@ -1,3 +1,12 @@
 spring:
   application:
     name: fortyall-desk
+
+  datasource:
+    url: jdbc:mysql://localhost:3306/fortyall_desk?serverTimezone=Asia/Seoul&characterEncoding=UTF-8
+    username: fortyall
+    password: whis!34679
+
+  jpa:
+    hibernate:
+      ddl-auto: update
