@@ -8,6 +8,10 @@
 | 2026-08-08 | 기획 문서 저장소 편입, Boot 3.5.16 스택 확정, 6주 로드맵 수립 | 스택 버전은 "최신"이 아니라 "학습 자료와 맞는 것"으로 고르는 게 나을 때가 있다 | - |
 | 2026-08-09 | ERD 1교시 — 엑셀 한 장에서 테이블 8개 도출 | **값이 하나가 아니면 컬럼이 아니라 테이블이다** (= 제1정규형). 오늘 이 규칙 하나로 영업시간·NTRP·역할·잔여를 전부 풀었다 | 문서에서 엔티티 추출은 아직 어려움 → 구체적 예시에서 쪼개는 방식으로 진행 중 |
 | 2026-08-09 | ERD 2·3교시 — 관계 설계 + 남은 2개 도출, **11개 완성** | **홀드는 스케줄의 사실도 참가의 사실도 아니다.** 사실이 어느 단위에 속하는지가 테이블 경계를 정한다 | 면접 Q3(잔여를 컬럼으로 안 두는 이유)는 스스로 설명 못 함 → 역할극으로 재학습 |
+| 2026-08-22 | **D01** 로컬 개발 환경 — Docker MySQL + datasource 연결 | (직접 작성) | (직접 작성) |
+| 2026-08-22 | **D02 / Task 2** BaseEntity·Center 엔티티, 테스트 H2 분리 | (직접 작성) | (직접 작성) |
+| 2026-08-24 | **기획 재수립** — 장면 인터뷰 17개로 기획서 v2 작성, 네이밍 규칙 확정 | 설명할 수 없는 도메인은 구현해도 못 쓴다 | - |
+| 2026-08-27 | **Task 3** 계정·소속·역할 — 연관관계, 유니크 제약, N+1 | **`@ManyToOne`이 있는 쪽에 FK가 생긴다.** 자바는 객체, DB는 숫자 — 그 번역이 JPA다 | (직접 작성) |
 
 ## 1교시에서 도출한 테이블 (8개)
 
@@ -16,8 +20,8 @@ member              회원 (코치도 여기 — 별도 테이블 X, 역할로 �
 member_role         역할 (ADMIN/COACH/MEMBER, 복수 보유 가능)
 product             상품 카탈로그
 lesson_pass         수업권 (한 회원이 여러 장 보유)
-pass_transaction    수업권 변동 원장 ← 잔여는 저장하지 않고 SUM으로 계산
-standing_schedule   고정 스케줄 규칙 (매주 목 10:00)
+lesson_pass_ledger    수업권 변동 원장 ← 잔여는 저장하지 않고 SUM으로 계산
+recurring_schedule   고정 스케줄 규칙 (매주 목 10:00)
 lesson              실제 발생한 레슨 1건
 lesson_participant  레슨 참가자 + 출석 상태 (2인 레슨 대응)
 ```
@@ -37,20 +41,20 @@ lesson_participant  레슨 참가자 + 출석 상태 (2인 레슨 대응)
 account ──1:N──> membership <──N:1── center      (N:M → membership이 중간 테이블)
 membership ──1:N──> membership_role
 center ──1:N──> product ──1:N──> lesson_pass
-membership ──1:N──> lesson_pass ──1:N──> pass_transaction
-standing_schedule ──1:N──> lesson ──1:N──> lesson_participant
-lesson_participant: FK 3개 (lesson_id, membership_id, lesson_pass_id)
+membership ──1:N──> lesson_pass ──1:N──> lesson_pass_ledger
+recurring_schedule ──1:N──> lesson ──1:N──> lesson_participant
+lesson_participant: FK 3개 (lesson_id, center_membership_id, lesson_pass_id)
 ```
 
 **어제 구조에서 교정된 것**
 | 어제 | 오늘 | 이유 |
 |---|---|---|
-| `member` | `account` + `membership` | 사람 ≠ 센터별 소속 (윤지훈 다중 센터) |
+| `member` | `account` + `membership` | 사람 ≠ 센터별 소속 (윤다리 다중 센터) |
 | `member_role` | `membership_role` | 역할은 센터마다 다르다 |
-| `lesson_pass.member_id` | `lesson_pass.membership_id` | 수업권은 센터별 분리 — 안 그러면 테넌트 격리가 뚫린다 |
+| `lesson_pass.member_id` | `lesson_pass.center_membership_id` | 수업권은 센터별 분리 — 안 그러면 테넌트 격리가 뚫린다 |
 
 **HANDOFF ERD 초안(11개)과 비교**
-- 아직 못 찾음: `regular_enrollment`, `schedule_participant`
+- 아직 못 찾음: `recurring_enrollment`, `schedule_assignment`
 - **초안에 없는데 직접 찾아낸 것: `membership_role`** (기획서 3.3 "Role 복수 보유"를 만족하려면 필요)
 
 ## 3교시 — 남은 2개 도출, ERD 완성 (2026-08-09)
@@ -59,21 +63,21 @@ lesson_participant: FK 3개 (lesson_id, membership_id, lesson_pass_id)
 - 테이블 경계를 정하는 질문: **"이 사실은 무엇에 대한 사실인가?"**
 - 같은 값이 여러 줄에 복사되면 그건 **아직 이름 없는 단위가 숨어 있다는 신호** (1교시 💣1번과 같은 폭탄)
 - 같은 테이블을 두 번 참조해도 된다 — 단 **컬럼 이름으로 역할을 구분**한다 (`coach_membership_id`)
-- 파생 가능한 FK는 중복 저장하지 않는다 (`schedule_participant`에서 `membership_id` 제거)
+- 파생 가능한 FK는 중복 저장하지 않는다 (`schedule_assignment`에서 `center_membership_id` 제거)
 
 **도출한 2개**
 ```
-schedule_participant   standing_schedule_id + regular_enrollment_id
+schedule_assignment   recurring_schedule_id + recurring_enrollment_id
                        └ 1인=1줄, 2인=2줄, 주2회=2줄. 구조 하나로 전부 표현
-regular_enrollment     membership_id + 상태 + 홀드종료일 + grace종료일 + 현재/다음 pass
+recurring_enrollment     center_membership_id + 상태 + 홀드종료일 + grace종료일 + 현재/다음 pass
                        └ 홀드·Renewal Grace가 사는 곳 (기획서 4.2 / CLAUDE.md 용어 규칙)
 ```
 
-**왜 regular_enrollment가 필요했나 (반례 2개)**
+**왜 recurring_enrollment가 필요했나 (반례 2개)**
 | 홀드를 어디 두면 | 무엇이 깨지나 |
 |---|---|
-| `standing_schedule` | 정민호만 홀드인데 **정하늘까지 멈춘다** (한 슬롯 공유) |
-| `schedule_participant` | 이수민 주 2회 → **같은 홀드 정보가 두 줄에 복사**, 하나만 고치면 유령 상태 |
+| `recurring_schedule` | 김상진만 홀드인데 **김아들까지 멈춘다** (한 슬롯 공유) |
+| `schedule_assignment` | 김서연 주 2회 → **같은 홀드 정보가 두 줄에 복사**, 하나만 고치면 유령 상태 |
 
 → 홀드는 "회원의 정기 이용 관계 전체"에 대한 사실. 그래서 그 단위를 테이블로 만들었다.
 
@@ -82,12 +86,12 @@ regular_enrollment     membership_id + 상태 + 홀드종료일 + grace종료일
 [사람·테넌트]
   account ──1:N──> membership <──N:1── center
                         ├──1:N──> membership_role
-                        ├──1:N──> lesson_pass ──1:N──> pass_transaction
+                        ├──1:N──> lesson_pass ──1:N──> lesson_pass_ledger
                         │              ↑ N:1
                         │           product <──1:N── center
-                        └──1:N──> regular_enrollment
+                        └──1:N──> recurring_enrollment
                                           │ 1:N
-  standing_schedule ──1:N──> schedule_participant
+  recurring_schedule ──1:N──> schedule_assignment
          │ 1:N
       lesson ──1:N──> lesson_participant ──> membership, lesson_pass
 ```
@@ -100,19 +104,24 @@ HANDOFF ERD 초안 11개와 일치 + `membership_role`은 초안에 없던 것�
 
 ## 아직 안 푼 문제
 
-- ~~**윤지훈(다중 센터 회원)**~~ → 2교시에서 `account` + `membership` 분리로 해결 (기획서 3.2)
+- ~~**윤다리(다중 센터 회원)**~~ → 2교시에서 `account` + `membership` 분리로 해결 (기획서 3.2)
 - `슬롯`이 테이블인가? 기획서 4.4의 "빈 시간 = 근무시간 − (스케줄 + 예약 + 닫은구간)"은 계산 결과 → **보류 유지**
 - `lesson`의 수동 수정 여부(Materializer 덮어쓰기 금지)를 어떤 컬럼으로 표현할지 → DDL 단계에서 결정
 
 ## 다음에 할 것
 
-**W1-L4 (4교시) — DDL 작성.** ERD 표 11개를 실제 `CREATE TABLE` 문으로 옮긴다. 여기서 배울 것:
-- **타입 고르기** — 전화번호를 왜 숫자가 아니라 문자로 두나, 돈을 왜 `DECIMAL`로 두나
-- **NOT NULL / UNIQUE** — 어떤 규칙을 DB가 강제하게 할 것인가 (동시성 5대 중 유니크 제약이 여기서 나온다)
-- **인덱스** — 없으면 W6 k6 부하테스트에서 그대로 터진다
+**22일 커리큘럼으로 재시작했다 (2026-08-22).**
+- 기획 정본: `docs/기획서_v2.md` (2026-08-24 재수립)
+- 설계: `docs/superpowers/specs/2026-08-22-22일-완성-커리큘럼-design.md`
+- 실행: `docs/superpowers/plans/2026-08-22-slice1-뼈대와-배포.md`
 
-이후: JPA 엔티티 매핑 → `application.yaml` MySQL datasource 설정(현재 없어서 `bootRun` 불가).
+| | 내용 |
+|---|---|
+| 지금 | **Task 3 완료** — 테이블 4개, 테스트 14개 통과 |
+| 다음 | **Task 4** — OTP·이메일 인증과 토큰 발급 |
+| 이번 슬라이스 목표 | `git push` → AWS 자동 배포 → `https://www.fortyall.net` |
 
-> ⚠️ **일정 갭**: 3교시 종료 = 2026-08-09. 다음 세션 = 2026-08-19 (10일 공백).
-> [00_로드맵.md](00_로드맵.md)상 8/19은 W2(골격 + 첫 AWS 배포) 주간인데 실제 진도는 W1 4교시.
-> 남은 기간 8/19~9/16 = 4주. 4교시 시작 전에 로드맵 재조정 여부를 결정할 것.
+Task별 회고는 `W1_SETUP/T{번호}_정리.md` 에 남긴다.
+
+> ERD 워크시트(`W1_ERD/`)는 삭제했다. 도출 과정과 결론은 위 "1~3교시" 절에 남아 있고,
+> 확정된 12개 테이블 구조는 `docs/기획서_v2.md` 와 `docs/네이밍_규칙.md` 가 보관한다.
