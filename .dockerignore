@@ -1,0 +1,15 @@
+.git
+.gitignore
+.gradle
+build/
+.idea
+.vscode
+*.iml
+docs/
+design-ref/
+HELP.md
+CLAUDE.md
+docker-compose.yml
+Dockerfile
+.dockerignore
+.DS_Store

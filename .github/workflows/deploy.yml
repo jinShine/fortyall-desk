@@ -1,0 +1,131 @@
+name: deploy
+
+on:
+  push:
+    branches: [main, feature/phase1]
+  workflow_dispatch:
+
+env:
+  AWS_REGION: ap-northeast-2
+  ECR_REGISTRY: 513370128537.dkr.ecr.ap-northeast-2.amazonaws.com
+  ECR_REPOSITORY: fortyall-desk
+  INSTANCE_ID: i-0b3b37b86b0913dad
+
+# OIDC 토큰을 발급받으려면 id-token: write 가 필요하다.
+# 기본값은 none 이라, 이 블록이 없으면 AWS 로그인 단계에서 막힌다.
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: gradle
+
+      - name: 테스트 실행
+        run: ./gradlew test --no-daemon
+
+  build-and-deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: AWS 자격 증명 획득 (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::513370128537:role/fortyall-github-actions-role
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: ECR 로그인
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: 이미지 빌드 후 푸시
+        run: |
+          docker build \
+            -t "$ECR_REGISTRY/$ECR_REPOSITORY:${{ github.sha }}" \
+            -t "$ECR_REGISTRY/$ECR_REPOSITORY:latest" \
+            .
+          docker push "$ECR_REGISTRY/$ECR_REPOSITORY:${{ github.sha }}"
+          docker push "$ECR_REGISTRY/$ECR_REPOSITORY:latest"
+
+      - name: EC2 에 배포 (SSM)
+        env:
+          IMAGE: ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          # 서버에서 실행할 스크립트.
+          # \$ 로 escape 한 것은 러너가 아니라 서버 셸에서 평가되어야 하는 변수다.
+          cat > /tmp/remote.sh <<REMOTE
+          set -e
+          aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY}
+          docker pull ${IMAGE}
+          docker rm -f fortyall-app || true
+          docker run -d --name fortyall-app --restart unless-stopped -p 8080:8080 --env-file /opt/fortyall/app.env ${IMAGE}
+
+          # 7일보다 오래된 미사용 이미지 정리 (디스크 30GB 를 넘기지 않게)
+          docker image prune -af --filter "until=168h" || true
+
+          ok=0
+          for i in \$(seq 1 30); do
+            if curl -sf http://localhost:8080/actuator/health > /dev/null; then ok=1; break; fi
+            sleep 3
+          done
+          if [ "\$ok" -ne 1 ]; then
+            echo "HEALTHCHECK_FAILED"
+            docker logs fortyall-app --tail 50
+            exit 1
+          fi
+          echo "DEPLOY_OK ${IMAGE}"
+          REMOTE
+
+          # SSM 은 명령을 문자열 배열로 받는다. 줄 단위로 쪼개 JSON 으로 만든다.
+          PARAMS=$(jq -Rn --rawfile s /tmp/remote.sh '{commands: ($s | rtrimstr("\n") | split("\n"))}')
+
+          CMD_ID=$(aws ssm send-command \
+            --instance-ids "$INSTANCE_ID" \
+            --document-name "AWS-RunShellScript" \
+            --comment "deploy ${{ github.sha }}" \
+            --parameters "$PARAMS" \
+            --query 'Command.CommandId' --output text)
+
+          echo "명령 ID: $CMD_ID"
+
+          STATUS=Pending
+          for i in $(seq 1 60); do
+            sleep 5
+            STATUS=$(aws ssm get-command-invocation \
+              --command-id "$CMD_ID" --instance-id "$INSTANCE_ID" \
+              --query 'Status' --output text 2>/dev/null || echo Pending)
+            case "$STATUS" in
+              Success) break ;;
+              Failed|TimedOut|Cancelled)
+                echo "::error::배포 실패 ($STATUS)"
+                aws ssm get-command-invocation --command-id "$CMD_ID" \
+                  --instance-id "$INSTANCE_ID" --query 'StandardOutputContent' --output text || true
+                aws ssm get-command-invocation --command-id "$CMD_ID" \
+                  --instance-id "$INSTANCE_ID" --query 'StandardErrorContent' --output text || true
+                exit 1 ;;
+            esac
+          done
+
+          if [ "$STATUS" != "Success" ]; then
+            echo "::error::배포가 5분 안에 끝나지 않았습니다 (마지막 상태: $STATUS)"
+            exit 1
+          fi
+
+          aws ssm get-command-invocation --command-id "$CMD_ID" \
+            --instance-id "$INSTANCE_ID" --query 'StandardOutputContent' --output text
+
+      - name: 외부에서 최종 확인
+        run: |
+          curl -sf --retry 10 --retry-delay 3 https://fortyall.net/actuator/health
+          echo ""

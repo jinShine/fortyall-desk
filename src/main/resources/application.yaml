@@ -1,3 +1,21 @@
 spring:
   application:
     name: fortyall-desk
+
+  profiles:
+    default: local
+
+  jpa:
+    open-in-view: false
+    properties:
+      hibernate:
+        format_sql: true
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+  endpoint:
+    health:
+      show-details: never

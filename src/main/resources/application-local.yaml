@@ -1,0 +1,10 @@
+spring:
+  datasource:
+    url: jdbc:mysql://localhost:3306/fortyall_desk?connectionTimeZone=Asia/Seoul&forceConnectionTimeZoneToSession=true&characterEncoding=UTF-8
+    username: fortyall
+    password: whis!34679
+
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: true
