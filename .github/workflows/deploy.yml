@@ -38,6 +38,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # 디버그: AWS 가 검증하는 값(sub·aud·iss)을 실제로 확인한다.
+      # 토큰 자체는 절대 출력하지 않는다 — 그건 자격증명이다.
+      - name: OIDC 토큰 클레임 확인
+        run: |
+          TOKEN=$(curl -sH "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=sts.amazonaws.com" | jq -r '.value')
+          PAYLOAD=$(echo "$TOKEN" | cut -d. -f2)
+          case $((${#PAYLOAD} % 4)) in
+            2) PAYLOAD="$PAYLOAD==" ;;
+            3) PAYLOAD="$PAYLOAD=" ;;
+          esac
+          echo "$PAYLOAD" | tr '_-' '/+' | base64 -d 2>/dev/null \
+            | jq '{iss, aud, sub, repository, repository_owner, ref, workflow_ref}'
+
       - name: AWS 자격 증명 획득 (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
